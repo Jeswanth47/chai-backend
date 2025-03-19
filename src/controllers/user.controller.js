@@ -6,6 +6,7 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 import jwt from 'jsonwebtoken'
 import mongoose from 'mongoose';
 
+
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
     const user = await User.findById(userId);
@@ -113,7 +114,7 @@ const loginUser = asyncHandler(async (req, res) => {
 const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
-    { $set: { refreshToken: undefined } },
+    { $unset: { refreshToken: 1 } },
     { new: true }
   );
 
@@ -179,7 +180,18 @@ const changeCurrentPassword=asyncHandler(async(req,res)=> {
 })
 
 const getCurrentUser= asyncHandler(async(req,res)=> {
-  return res.status(200).json(200,req.user,"current user fetched Successfully")
+  const user=await User.findById(req.user._id).select('username fullName');
+  if(!user) {
+    throw new ApiError(400,[],"User not found")
+  }
+  return res.status(200).json({
+    status:200,
+    data:{
+      username:user.username,
+      fullName:user.fullName
+    },
+    message:"user fetched successfully"
+  })
 })
 
 const updateAccountDetails=asyncHandler(async(req,res)=> {
@@ -204,32 +216,72 @@ const updateAccountDetails=asyncHandler(async(req,res)=> {
   )
 })
 
-const updateUserAvatar= asyncHandler(async(req,res)=> {
-    const avatarLocalPath=req.file?.path
+// const updateUserAvatar= asyncHandler(async(req,res)=> {
+//     const avatarLocalPath=req.file?.path
 
-    if(!avatarLocalPath) {
-      throw new ApiError(400,'Avatar file is missing')
-    }
+//     if(!avatarLocalPath) {
+//       throw new ApiError(400,'Avatar file is missing')
+//     }
 
-     
+//     //Todo: delete old one and upload new one do the task
 
-    const avatar=await uploadOnCloudinary(avatarLocalPath)
-    if(!avatar.url) {
-      throw new ApiError(400,"Error while uploading on avatar")
-    }
+//     const avatar=await uploadOnCloudinary(avatarLocalPath)
+//     if(!avatar.url) {
+//       throw new ApiError(400,"Error while uploading on avatar")
+//     }
 
-    const user=await User.findByIdAndUpdate(req.user?._id, 
-      {
-        $set: {
-          avatar:avatar.url
-        }
-      }, 
-      {new:true}
-    ).select("-password")
+//     const user=await User.findByIdAndUpdate(req.user?._id, 
+//       {
+//         $set: {
+//           avatar:avatar.url
+//         }
+//       }, 
+//       {new:true}
+//     ).select("-password")
 
-    return res.status(200).json(new ApiResponse(200,user,"Avatar Image updated successfully"))
+//     return res.status(200).json(new ApiResponse(200,user,"Avatar Image updated successfully"))
+// })
 
-})
+const updateUserAvatar = asyncHandler(async (req, res) => {
+  const avatarLocalPath = req.file?.path;
+
+  if (!avatarLocalPath) {
+      throw new ApiError(400, 'Avatar file is missing');
+  }
+
+  // Fetch user to get the old avatar
+  const user = await User.findById(req.user?._id);
+  if (!user) {
+      throw new ApiError(404, 'User not found');
+  }
+
+  // Delete the old avatar from Cloudinary if it exists
+  if (user.avatar) {
+      try {
+          // Extract public_id from Cloudinary URL
+          const parts = user.avatar.split('/');
+          const filename = parts[parts.length - 1]; // Get last part of the URL (image name)
+          const publicId = filename.split('.')[0]; // Remove file extension
+
+          await cloudinary.uploader.destroy(publicId);
+      } catch (error) {
+          console.error("Error deleting old avatar from Cloudinary:", error);
+      }
+  }
+
+  // Upload new avatar to Cloudinary
+  const avatar = await uploadOnCloudinary(avatarLocalPath);
+  if (!avatar?.url) {
+      throw new ApiError(400, "Error while uploading avatar");
+  }
+
+  // Update user with the new avatar URL
+  user.avatar = avatar.url;
+  await user.save();
+
+  return res.status(200).json(new ApiResponse(200, user, "Avatar Image updated successfully"));
+});
+
 
 const updateUserCoverImage=asyncHandler(async(req,res)=> {
   const coverImageLocalPath=req.file?.path
@@ -323,8 +375,6 @@ const getUserChannelProfile=asyncHandler(async(req,res)=> {
 
     return res.status(200)
     .json(new ApiResponse(200,channel[0],"User channel fetched Successfully"))
-
-
 })
 
 const getWatchHistory=asyncHandler(async(req,res)=> {
